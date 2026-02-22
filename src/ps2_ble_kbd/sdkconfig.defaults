@@ -1,0 +1,16 @@
+# Bluetooth: NimBLE only (ESP32-C6 is BLE-only, no Classic BT)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_CLASSIC_ENABLED=n
+
+# Persist bonding keys across reboots (required for HID reconnection)
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# Secure Connections pairing (ECDH-based, BT 4.2+)
+CONFIG_BT_NIMBLE_SM_SC=1
+
+# GAP device name visible during Bluetooth scan
+CONFIG_BT_NIMBLE_SVC_GAP_DEVICE_NAME="ESP32-C6 Keyboard"
+
+# Allow up to 3 simultaneous connections
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3

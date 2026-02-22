@@ -1,0 +1,16 @@
+menu "PS/2 Keyboard GPIO"
+
+    config PS2_CLK_GPIO
+        int "PS/2 Clock GPIO number"
+        default 6
+        help
+            GPIO connected to the PS/2 keyboard CLK line.
+            Must support interrupts (NEGEDGE).
+
+    config PS2_DATA_GPIO
+        int "PS/2 Data GPIO number"
+        default 7
+        help
+            GPIO connected to the PS/2 keyboard DATA line.
+
+endmenu

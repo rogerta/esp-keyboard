@@ -1,0 +1,23 @@
+# ESP-IDF build output
+build/
+
+# Generated sdkconfig — intentional settings live in sdkconfig.defaults
+sdkconfig
+sdkconfig.old
+
+# IDF Component Manager downloads and lock file
+managed_components/
+dependencies.lock
+
+# CMake artifacts (created if cmake is invoked directly instead of via idf.py)
+CMakeCache.txt
+CMakeFiles/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo

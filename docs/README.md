@@ -16,6 +16,7 @@ Focus: **ESP32-C3** (BLE 5.0) and **ESP32-C6** (BLE 5.3). Both are BLE-only (no 
 | [ble-mesh.md](ble-mesh.md) | BLE Mesh architecture, node types, provisioning, models, encryption | 27 KB |
 | [nimble-and-controller.md](nimble-and-controller.md) | NimBLE API, Controller/VHCI, bt_common, WiFi coexistence | 39 KB |
 | [classic-bt.md](classic-bt.md) | Classic BT profiles (A2DP, SPP, HFP, etc.) — **not available on C3/C6** | 57 KB |
+| [ble-hid-keyboard.md](ble-hid-keyboard.md) | **HID keyboard** — HOGP profile, report descriptor, pairing, key codes, example walkthrough | 12 KB |
 
 ## C3/C6 Quick Reference
 

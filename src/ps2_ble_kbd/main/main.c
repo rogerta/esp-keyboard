@@ -54,6 +54,35 @@ static void led_cb(ps2_proto_t *proto, uint8_t ps2_leds)
     ps2_proto_write_and_wait(proto, ps2_leds);
 }
 
+/* ---------- Deep sleep ---------- */
+
+static void enter_deep_sleep(void)
+{
+    ESP_LOGI(TAG, "keyboard idle for %d s, entering deep sleep",
+             CONFIG_DEEP_SLEEP_TIMEOUT_SEC);
+
+    /* Release all keys so the host doesn't see stuck keys */
+    if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE && g_encrypted) {
+        hid_keyboard_report_t empty = {0};
+        hid_keyboard_send(g_conn_handle, &empty);
+    }
+
+    /* Disconnect BLE; brief delay lets the packet reach the host */
+    if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(g_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    } else {
+        ble_gap_adv_stop();
+    }
+
+    /* PS/2 CLK is idle-high; a keypress pulls it LOW → wake trigger */
+    esp_deep_sleep_enable_gpio_wakeup(
+        1ULL << CONFIG_PS2_CLK_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
+
+    esp_deep_sleep_start();
+    /* Not reached — chip resets on wakeup */
+}
+
 /* ---------- PS/2 task ---------- */
 
 static void ps2_task(void *arg)
@@ -80,9 +109,13 @@ static void ps2_task(void *arg)
     ESP_LOGI(TAG, "PS/2 task started (clk=%d data=%d)",
              CONFIG_PS2_CLK_GPIO, CONFIG_PS2_DATA_GPIO);
 
+    TickType_t last_activity = xTaskGetTickCount();
+    const TickType_t sleep_timeout =
+        pdMS_TO_TICKS((uint32_t)CONFIG_DEEP_SLEEP_TIMEOUT_SEC * 1000);
+
     while (1) {
-        /* Sleep until ISR or BLE LED callback wakes us */
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        /* Wake on PS/2 byte, BLE LED callback, or periodic idle check */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
 
         /* Decode any bytes received from the keyboard */
         ps2_kbd_process(&kbd, &proto);
@@ -90,6 +123,7 @@ static void ps2_task(void *arg)
         /* Build HID report; post if changed */
         hid_keyboard_report_t report;
         if (ps2_mgr_read(&mgr, &kbd, &report)) {
+            last_activity = xTaskGetTickCount();
             xQueueSend(g_report_queue, &report, 0);
         }
 
@@ -97,6 +131,11 @@ static void ps2_task(void *arg)
         uint8_t led_byte;
         if (xQueueReceive(g_led_queue, &led_byte, 0) == pdTRUE) {
             ps2_mgr_apply_ble_leds(&mgr, led_byte);
+        }
+
+        /* Enter deep sleep after prolonged inactivity */
+        if ((xTaskGetTickCount() - last_activity) >= sleep_timeout) {
+            enter_deep_sleep();
         }
     }
 }
@@ -268,6 +307,10 @@ static void nimble_host_task(void *param)
 
 void app_main(void)
 {
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+        ESP_LOGI(TAG, "woke from deep sleep (keypress)");
+    }
+
     /* NVS required for BLE bonding key storage */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||

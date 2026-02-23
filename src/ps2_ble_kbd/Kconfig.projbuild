@@ -1,16 +1,26 @@
-menu "PS/2 Keyboard GPIO"
+menu "PS/2 Keyboard"
 
     config PS2_CLK_GPIO
         int "PS/2 Clock GPIO number"
         default 6
+        range 0 7
         help
             GPIO connected to the PS/2 keyboard CLK line.
-            Must support interrupts (NEGEDGE).
+            Must be GPIO 0–7 (LP-capable) for deep sleep wakeup.
 
     config PS2_DATA_GPIO
         int "PS/2 Data GPIO number"
         default 7
         help
             GPIO connected to the PS/2 keyboard DATA line.
+
+    config DEEP_SLEEP_TIMEOUT_SEC
+        int "Deep sleep inactivity timeout (seconds)"
+        default 300
+        range 30 3600
+        help
+            Seconds of keyboard inactivity before entering deep sleep.
+            The ESP32-C6 draws ~5 µA in deep sleep and wakes on the
+            next keypress (PS/2 CLK falling edge).
 
 endmenu

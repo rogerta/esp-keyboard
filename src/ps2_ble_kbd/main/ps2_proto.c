@@ -54,6 +54,11 @@ static BaseType_t isr_handle_receive(ps2_proto_t *proto, int bit)
         if (bit) {
             uint8_t b = proto->current;   /* copy out of volatile */
             xQueueSendFromISR(proto->rx_queue, &b, &woken);
+            if (proto->task_to_notify) {
+                BaseType_t w2 = pdFALSE;
+                vTaskNotifyGiveFromISR(proto->task_to_notify, &w2);
+                woken |= w2;
+            }
         }
         proto->state = PS2P_WAIT_R_START;
         break;

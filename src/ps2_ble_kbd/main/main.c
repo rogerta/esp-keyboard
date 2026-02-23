@@ -16,6 +16,8 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "store/config/ble_store_config.h"
 
+#include "esp_pm.h"
+#include "esp_sleep.h"
 #include "sdkconfig.h"
 
 #include "hid_dev.h"
@@ -33,6 +35,9 @@ static QueueHandle_t g_report_queue;
 
 /* LED bytes from BLE GATT callback (hid_dev.c) to ps2_task */
 QueueHandle_t g_led_queue;   /* extern'd by hid_dev.c */
+
+/* ps2_task handle — notified by ISR and BLE output-report callback */
+TaskHandle_t g_ps2_task;     /* extern'd by hid_dev.c */
 
 /* ---------- BLE connection state ---------- */
 
@@ -69,10 +74,16 @@ static void ps2_task(void *arg)
     ps2_kbd_init(&kbd);
     ps2_mgr_init(&mgr, &proto, led_cb);
 
+    /* Let ISR wake this task on each received PS/2 byte */
+    proto.task_to_notify = xTaskGetCurrentTaskHandle();
+
     ESP_LOGI(TAG, "PS/2 task started (clk=%d data=%d)",
              CONFIG_PS2_CLK_GPIO, CONFIG_PS2_DATA_GPIO);
 
     while (1) {
+        /* Sleep until ISR or BLE LED callback wakes us */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
         /* Decode any bytes received from the keyboard */
         ps2_kbd_process(&kbd, &proto);
 
@@ -87,8 +98,6 @@ static void ps2_task(void *arg)
         if (xQueueReceive(g_led_queue, &led_byte, 0) == pdTRUE) {
             ps2_mgr_apply_ble_leds(&mgr, led_byte);
         }
-
-        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
@@ -145,8 +154,8 @@ static void start_advertising(void)
 
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    params.itvl_min  = BLE_GAP_ADV_ITVL_MS(40);
-    params.itvl_max  = BLE_GAP_ADV_ITVL_MS(60);
+    params.itvl_min  = BLE_GAP_ADV_ITVL_MS(100);
+    params.itvl_max  = BLE_GAP_ADV_ITVL_MS(150);
 
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
                            &params, gap_event_cb, NULL);
@@ -164,6 +173,19 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
             g_conn_handle = event->connect.conn_handle;
             g_encrypted   = false;
             ESP_LOGI(TAG, "connected, handle=%d", g_conn_handle);
+
+            /* Request power-friendly connection parameters:
+             * 7.5–15 ms interval, skip up to 30 events when idle,
+             * 4 s supervision timeout.  Host may negotiate different values. */
+            struct ble_gap_upd_params conn_params = {
+                .itvl_min            = 6,    /* 7.5 ms  */
+                .itvl_max            = 12,   /* 15 ms   */
+                .latency             = 30,
+                .supervision_timeout = 400,  /* 4000 ms */
+                .min_ce_len          = 0,
+                .max_ce_len          = 0,
+            };
+            ble_gap_update_params(g_conn_handle, &conn_params);
         } else {
             ESP_LOGI(TAG, "connection failed, status=%d", event->connect.status);
             start_advertising();
@@ -280,7 +302,19 @@ void app_main(void)
     ESP_ERROR_CHECK(hid_dev_init());
     ble_store_config_init();
 
-    xTaskCreate(ps2_task, "ps2",  4096, NULL, 5, NULL);
+    /* Power management: auto light sleep when all tasks are idle */
+    esp_pm_config_t pm_cfg = {
+        .max_freq_mhz      = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz      = 10,
+        .light_sleep_enable = true,
+    };
+    ESP_ERROR_CHECK(esp_pm_configure(&pm_cfg));
+
+    /* Allow PS/2 CLK falling edge to wake from light sleep */
+    gpio_wakeup_enable(CONFIG_PS2_CLK_GPIO, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+
+    xTaskCreate(ps2_task, "ps2",  4096, NULL, 5, &g_ps2_task);
     xTaskCreate(ble_task, "ble",  4096, NULL, 4, NULL);
 
     nimble_port_freertos_init(nimble_host_task);

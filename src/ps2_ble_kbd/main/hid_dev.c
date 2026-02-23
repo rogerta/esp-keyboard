@@ -18,6 +18,7 @@ static const char *TAG = "hid_dev";
  * ps2_task can pick it up without blocking the BLE stack.
  */
 extern QueueHandle_t g_led_queue;
+extern TaskHandle_t  g_ps2_task;
 
 /* ---------- Static characteristic data ---------- */
 
@@ -173,6 +174,8 @@ static int output_rpt_access(uint16_t conn_handle, uint16_t attr_handle,
                  (s_led_state >> 0) & 1, (s_led_state >> 1) & 1, (s_led_state >> 2) & 1);
         /* Forward to ps2_task; non-blocking (ps2_task drains this queue) */
         xQueueSend(g_led_queue, &s_led_state, 0);
+        if (g_ps2_task)
+            xTaskNotifyGive(g_ps2_task);
         return 0;
     default:
         return BLE_ATT_ERR_UNLIKELY;

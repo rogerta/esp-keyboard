@@ -18,6 +18,7 @@
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 
@@ -40,6 +41,7 @@ typedef struct {
     volatile ps2_proto_state_t state;
     volatile uint8_t current;  /* shift register for current byte      */
     volatile int     parity;   /* running odd-parity accumulator       */
+    TaskHandle_t     task_to_notify;  /* optional; notified on rx byte */
 } ps2_proto_t;
 
 /*

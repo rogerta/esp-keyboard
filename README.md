@@ -107,6 +107,93 @@ graph LR
 > **ESP32-C6 GPIOs are NOT 5 V tolerant** (absolute max 3.6 V).
 > Do not connect PS/2 lines directly when the keyboard is powered at 5 V.
 
+## Architecture
+
+### System Overview
+
+```mermaid
+graph LR
+    KBD["PS/2 Keyboard"] <-->|"CLK + DATA<br>(open-drain bus)"| ESP["ESP32-C6<br>ps2_ble_kbd"]
+    ESP <-->|"BLE HID<br>(GATT notify)"| HOST["PC / Phone / Tablet"]
+```
+
+### Software Components
+
+```mermaid
+graph TD
+    subgraph ISR Context
+        ISR["PS/2 CLK NEGEDGE ISR<br><i>ps2_proto.c</i>"]
+    end
+
+    subgraph "ps2_task (prio 5)"
+        PROTO["ps2_proto<br>byte rx/tx"]
+        KBD["ps2_kbd<br>Set 2 scan-code decoder"]
+        MGR["ps2_mgr<br>key state + HID report builder"]
+    end
+
+    subgraph "ble_task (prio 4)"
+        BLE_SEND["hid_keyboard_send<br>BLE NOTIFY"]
+    end
+
+    subgraph "NimBLE host task"
+        GAP["GAP event handler<br>connect / encrypt / advertise"]
+        GATT["GATT services<br>DIS + BAS + HID"]
+    end
+
+    ISR -->|"rx_queue<br>(uint8_t)"| PROTO
+    PROTO --> KBD
+    KBD -->|"event_queue<br>(keycode, press/release)"| MGR
+    MGR -->|"g_report_queue<br>(8-byte HID report)"| BLE_SEND
+    BLE_SEND --> GATT
+    GATT -->|"g_led_queue<br>(LED output report)"| MGR
+```
+
+### Keypress Data Flow
+
+```mermaid
+sequenceDiagram
+    participant KB as PS/2 Keyboard
+    participant ISR as CLK ISR
+    participant PS2 as ps2_task
+    participant BLE as ble_task
+    participant HOST as BLE Host
+
+    KB->>ISR: CLK falling edges (11 bits)
+    ISR->>PS2: rx_queue + task notify
+    PS2->>PS2: ps2_kbd: decode scan code
+    PS2->>PS2: ps2_mgr: update bitmask, build report
+    PS2->>BLE: g_report_queue (8-byte report)
+    BLE->>HOST: GATT NOTIFY (input report)
+
+    Note over HOST,KB: LED feedback (reverse path)
+    HOST->>BLE: GATT WRITE (output report)
+    BLE->>PS2: g_led_queue + task notify
+    PS2->>KB: PS/2 0xED + LED byte
+```
+
+### BLE GATT Services
+
+```mermaid
+graph TD
+    subgraph "Device Information Service (0x180A)"
+        MANUF["Manufacturer Name (0x2A29)<br>READ"]
+        PNP["PnP ID (0x2A50)<br>READ"]
+    end
+
+    subgraph "Battery Service (0x180F)"
+        BATT["Battery Level (0x2A19)<br>READ | NOTIFY"]
+    end
+
+    subgraph "HID Service (0x1812)"
+        INFO["HID Info (0x2A4A)<br>READ"]
+        RMAP["Report Map (0x2A4B)<br>READ"]
+        CTRL["HID Control Point (0x2A4C)<br>WRITE_NO_RSP"]
+        PMOD["Protocol Mode (0x2A4E)<br>READ | WRITE_NO_RSP"]
+        INP["Input Report (0x2A4D)<br>READ | NOTIFY | READ_ENC<br><i>Report Ref: id=0 type=Input</i>"]
+        OUT["Output Report (0x2A4D)<br>READ | WRITE | READ_ENC | WRITE_ENC<br><i>Report Ref: id=0 type=Output</i>"]
+    end
+```
+
 ## Power Management
 
 Three power states, entered automatically:
